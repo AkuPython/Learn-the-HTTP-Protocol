@@ -14,9 +14,11 @@ const (
 	done
 )
 
+const bufferSize = 8
+
 type Request struct {
 	RequestLine RequestLine
-	State       int
+	state       int
 }
 
 type RequestLine struct {
@@ -26,7 +28,7 @@ type RequestLine struct {
 }
 
 func (r *Request) parse(data []byte) (int, error) {
-	if r.State == initialized {
+	if r.state == initialized {
 		rl, b, err := parseRequestLine(data)
 		if err != nil {
 			return 0, err
@@ -35,30 +37,43 @@ func (r *Request) parse(data []byte) (int, error) {
 			return 0, nil
 		}
 		r.RequestLine = *rl
-		r.State = done
+		r.state = done
 		return b, nil
 	}
-	if r.State == done {
+	if r.state == done {
 		return 0, errors.New("error: trying to read data in done state")
 	}
 	return 0, errors.New("error: unknown state")
 }
 
 func RequestFromReader(reader io.Reader) (*Request, error) {
-	r, err := io.ReadAll(reader)
-	if err != nil {
-		return nil, errors.New(fmt.Sprintf("Could not read from reader: %v\n", err))
-	}
-	reqLine, consumed, err := parseRequestLine(r)
-	if err != nil {
-		return nil, errors.New(fmt.Sprintf("Could not parse request line: %v\n", err))
-	}
-	if consumed == 0 {
+	r := Request{state: initialized}
+	buf := make([]byte, bufferSize, bufferSize)
+	readToIndex := 0
+	for r.state != done {
+		if readToIndex >= cap(buf) {
+			buf = append(buf, make([]byte, len(buf)*2, len(buf)*2)...)
+		}
+		i, err := reader.Read(buf[readToIndex:])
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				r.state = done
+				break
+			}
+			return nil, errors.New(fmt.Sprintf("Could not read from reader: %v\n", err))
+		}
+		readToIndex += i
 
+		i, err = r.parse(buf[:readToIndex])
+		if err != nil {
+			return nil, errors.New(fmt.Sprintf("Could not parse request line: %v\n", err))
+		}
+		if i > 0 {
+			copy(buf, buf[i:])
+			readToIndex -= i
+		}
 	}
-	return &Request{
-		RequestLine: *reqLine,
-	}, nil
+	return &r, nil
 }
 
 func isUpper(s string) bool {
