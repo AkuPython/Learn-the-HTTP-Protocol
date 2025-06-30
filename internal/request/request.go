@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/AkuPython/Learn-the-HTTP-Protocol/internal/headers"
 )
 
 type State int
 
 const (
 	initialized = iota
+	requestStateParsingHeaders
 	done
 )
 
@@ -18,6 +21,7 @@ const bufferSize = 8
 
 type Request struct {
 	RequestLine RequestLine
+	Headers     headers.Headers
 	state       int
 }
 
@@ -28,7 +32,23 @@ type RequestLine struct {
 }
 
 func (r *Request) parse(data []byte) (int, error) {
-	if r.state == initialized {
+	bytesParsed := 0
+	for r.state != done {
+		n, err := r.parseSingle(data[bytesParsed:])
+		if err != nil {
+			return 0, err
+		}
+		bytesParsed += n
+		if n == 0 {
+			break
+		}
+	}
+	return bytesParsed, nil
+}
+
+func (r *Request) parseSingle(data []byte) (int, error) {
+	switch r.state {
+	case initialized:
 		rl, b, err := parseRequestLine(data)
 		if err != nil {
 			return 0, err
@@ -37,41 +57,61 @@ func (r *Request) parse(data []byte) (int, error) {
 			return 0, nil
 		}
 		r.RequestLine = *rl
-		r.state = done
+		r.state = requestStateParsingHeaders
 		return b, nil
-	}
-	if r.state == done {
+	case requestStateParsingHeaders:
+		i, d, err := r.Headers.Parse(data)
+		if err != nil {
+			return 0, err
+		}
+		if i == 0 {
+			return 0, nil
+		}
+		if d {
+			r.state = done
+		}
+		return i, nil
+	case done:
 		return 0, errors.New("error: trying to read data in done state")
+	default:
+		return 0, errors.New("error: unknown state")
 	}
-	return 0, errors.New("error: unknown state")
 }
 
 func RequestFromReader(reader io.Reader) (*Request, error) {
-	r := Request{state: initialized}
+	r := Request{
+		state:   initialized,
+		Headers: headers.NewHeaders(),
+	}
 	buf := make([]byte, bufferSize, bufferSize)
 	readToIndex := 0
 	for r.state != done {
-		if readToIndex >= cap(buf) {
-			buf = append(buf, make([]byte, len(buf)*2, len(buf)*2)...)
+		if readToIndex >= len(buf) {
+			buf = append(buf, make([]byte, len(buf)*2)...)
 		}
 		i, err := reader.Read(buf[readToIndex:])
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				r.state = done
+				if r.state != done {
+					return nil, errors.New(fmt.Sprintf("Error: Incomplete request, in state %v, read %v bytes on EOF\n", r.state, i))
+				}
 				break
 			}
-			return nil, errors.New(fmt.Sprintf("Could not read from reader: %v\n", err))
+			return nil, errors.New(fmt.Sprintf("Error: Could not read from reader: %v\n", err))
 		}
 		readToIndex += i
 
 		i, err = r.parse(buf[:readToIndex])
 		if err != nil {
-			return nil, errors.New(fmt.Sprintf("Could not parse request line: %v\n", err))
+			switch r.state {
+			case initialized:
+				return nil, errors.New(fmt.Sprintf("Error: Could not parse request line: %v\n", err))
+			case requestStateParsingHeaders:
+				return nil, errors.New(fmt.Sprintf("Error: Could not parse headers: %v\n", err))
+			}
 		}
-		if i > 0 {
-			copy(buf, buf[i:])
-			readToIndex -= i
-		}
+		copy(buf, buf[i:])
+		readToIndex -= i
 	}
 	return &r, nil
 }

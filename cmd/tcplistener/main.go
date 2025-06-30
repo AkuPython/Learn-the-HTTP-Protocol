@@ -1,11 +1,13 @@
 package main
 
 import (
-	"errors"
+	// "errors"
 	"fmt"
-	"io"
+	// "io"
 	"net"
 	"strings"
+
+	"github.com/AkuPython/Learn-the-HTTP-Protocol/internal/request"
 )
 
 const host = "127.0.0.1:42069"
@@ -26,43 +28,60 @@ func main() {
 		}
 		fmt.Printf("Connection accepted from: %v\n", c.RemoteAddr().String())
 
-		lineChan := getLinesChannel(c)
-		for line := range lineChan {
-			fmt.Println(line)
+		// lineChan := getLinesChannel(c)
+		// for line := range lineChan {
+		// 	fmt.Println(line)
+		// }
+		r, err := request.RequestFromReader(c)
+		if err != nil {
+			fmt.Println(err)
+			return
 		}
-
+		fmt.Printf(`Request line:
+- Method: %s
+- Target: %s
+- Version: %s
+Headers:%s`,
+			r.RequestLine.Method,
+			r.RequestLine.RequestTarget,
+			r.RequestLine.HttpVersion,
+			"\n",
+		)
+		for h, v := range r.Headers {
+			fmt.Printf("- %v: %v\n", h, v)
+		}
 		fmt.Printf("Connection closed from: %v\n", c.RemoteAddr().String())
 	}
 }
 
-func getLinesChannel(f io.ReadCloser) <-chan string {
-	lines := make(chan string)
-	go func() {
-		defer f.Close()
-		defer close(lines)
-		currLine := ""
-		for {
-			buff := make([]byte, 8, 8)
-			n, err := f.Read(buff)
-			if err != nil {
-				if currLine != "" {
-					lines <- currLine
-				}
-				if errors.Is(err, io.EOF) {
-					break
-				}
-				fmt.Printf("error: %s\n", err.Error())
-				break
-			}
-			curr_read := string(buff[:n])
-			parts := strings.Split(curr_read, "\n")
-			for _, part := range parts[:len(parts)-1] {
-				lines <- fmt.Sprintf("%s%s", currLine, part)
-				currLine = ""
-			}
-			currLine += parts[len(parts)-1]
-		}
-
-	}()
-	return lines
-}
+// func getLinesChannel(f io.ReadCloser) <-chan string {
+// 	lines := make(chan string)
+// 	go func() {
+// 		defer f.Close()
+// 		defer close(lines)
+// 		currLine := ""
+// 		for {
+// 			buff := make([]byte, 8, 8)
+// 			n, err := f.Read(buff)
+// 			if err != nil {
+// 				if currLine != "" {
+// 					lines <- currLine
+// 				}
+// 				if errors.Is(err, io.EOF) {
+// 					break
+// 				}
+// 				fmt.Printf("error: %s\n", err.Error())
+// 				break
+// 			}
+// 			curr_read := string(buff[:n])
+// 			parts := strings.Split(curr_read, "\n")
+// 			for _, part := range parts[:len(parts)-1] {
+// 				lines <- fmt.Sprintf("%s%s", currLine, part)
+// 				currLine = ""
+// 			}
+// 			currLine += parts[len(parts)-1]
+// 		}
+//
+// 	}()
+// 	return lines
+// }

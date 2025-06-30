@@ -15,7 +15,11 @@ func NewHeaders() Headers {
 }
 
 func (h Headers) Set(key, value string) {
-	h[key] = value
+	if h[key] == "" {
+		h[key] = value
+	} else {
+		h[key] = fmt.Sprintf("%s, %s", h[key], value)
+	}
 }
 
 func (h Headers) Parse(data []byte) (n int, done bool, err error) {
