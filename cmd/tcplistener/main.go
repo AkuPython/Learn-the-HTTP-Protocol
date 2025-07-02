@@ -50,6 +50,7 @@ Headers:%s`,
 		for h, v := range r.Headers {
 			fmt.Printf("- %v: %v\n", h, v)
 		}
+		fmt.Printf("Body:\n%s\n", r.Body)
 		fmt.Printf("Connection closed from: %v\n", c.RemoteAddr().String())
 	}
 }

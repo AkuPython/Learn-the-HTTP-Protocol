@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/AkuPython/Learn-the-HTTP-Protocol/internal/headers"
@@ -14,6 +15,7 @@ type State int
 const (
 	initialized = iota
 	requestStateParsingHeaders
+	requestStateParsingBody
 	done
 )
 
@@ -22,6 +24,7 @@ const bufferSize = 8
 type Request struct {
 	RequestLine RequestLine
 	Headers     headers.Headers
+	Body        []byte
 	state       int
 }
 
@@ -68,9 +71,28 @@ func (r *Request) parseSingle(data []byte) (int, error) {
 			return 0, nil
 		}
 		if d {
-			r.state = done
+			r.state = requestStateParsingBody
 		}
 		return i, nil
+	case requestStateParsingBody:
+		cl := r.Headers.Get("content-length")
+		if cl == "" {
+			r.state = done
+			return 0, nil
+		}
+		aInt, err := strconv.Atoi(cl)
+		if err != nil {
+			return 0, fmt.Errorf("error: could not convert content-length to int: %s", err)
+		}
+		r.Body = append(r.Body, data...)
+		if len(r.Body) > aInt {
+			return 0, errors.New("error: request body larger than content-length")
+		}
+
+		if len(r.Body) == aInt {
+			r.state = done
+		}
+		return len(data), nil
 	case done:
 		return 0, errors.New("error: trying to read data in done state")
 	default:
@@ -82,6 +104,7 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 	r := Request{
 		state:   initialized,
 		Headers: headers.NewHeaders(),
+		Body:    make([]byte, 0),
 	}
 	buf := make([]byte, bufferSize, bufferSize)
 	readToIndex := 0
