@@ -1,25 +1,45 @@
 package server
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"sync/atomic"
 
+	"github.com/AkuPython/Learn-the-HTTP-Protocol/internal/request"
 	"github.com/AkuPython/Learn-the-HTTP-Protocol/internal/response"
 )
 
 type Server struct {
+	handler  Handler
 	listener net.Listener
 	closed   atomic.Bool
 }
 
-func Serve(port int) (*Server, error) {
+type HandlerError struct {
+	StatusCode response.StatusCode
+	Message    string
+}
+
+type Handler func(w io.Writer, req *request.Request) *HandlerError
+
+func (he HandlerError) WriteTo(w io.Writer) {
+	response.WriteStatusLine(w, he.StatusCode)
+	messageBytes := []byte(he.Message)
+	headers := response.GetDefaultHeaders(len(messageBytes))
+	response.WriteHeaders(w, headers)
+	w.Write(messageBytes)
+}
+
+func Serve(port int, h Handler) (*Server, error) {
 	l, err := net.Listen("tcp4", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return nil, err
 	}
 	s := &Server{
+		handler:  h,
 		listener: l,
 	}
 	go s.listen()
@@ -49,15 +69,24 @@ func (s *Server) listen() {
 
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
-	size := 0
-	err := response.WriteStatusLine(conn, response.StatusOK)
+	req, err := request.RequestFromReader(conn)
 	if err != nil {
-		log.Printf("error: could not write status-line")
+		hErr := &HandlerError{
+			StatusCode: response.StatusBadRequest,
+			Message:    err.Error(),
+		}
+		hErr.WriteTo(conn)
+		return
 	}
-	dh := response.GetDefaultHeaders(size)
-	err = response.WriteHeaders(conn, dh)
-	if err != nil {
-		log.Printf("error: could not write headers")
+	buf := bytes.NewBuffer([]byte{})
+	hErr := s.handler(buf, req)
+	if hErr != nil {
+		hErr.WriteTo(conn)
 	}
+	b := buf.Bytes()
+	response.WriteStatusLine(conn, response.StatusOK)
+	headers := response.GetDefaultHeaders(len(b))
+	response.WriteHeaders(conn, headers)
+	conn.Write(b)
 	return
 }
