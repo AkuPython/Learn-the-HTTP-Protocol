@@ -5,6 +5,8 @@ import (
 	"log"
 	"net"
 	"sync/atomic"
+
+	"github.com/AkuPython/Learn-the-HTTP-Protocol/internal/response"
 )
 
 type Server struct {
@@ -17,7 +19,6 @@ func Serve(port int) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	// defer l.Close()
 	s := &Server{
 		listener: l,
 	}
@@ -38,7 +39,7 @@ func (s *Server) listen() {
 			if s.closed.Load() {
 				return
 			}
-			log.Fatal(err)
+			log.Printf("error: could not accept connection: %v", err)
 			continue
 		}
 
@@ -48,16 +49,15 @@ func (s *Server) listen() {
 
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
-	placeholder := make([]byte, 8096)
-	_, err := conn.Read(placeholder)
+	size := 0
+	err := response.WriteStatusLine(conn, response.StatusOK)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("error: could not write status-line")
 	}
-	response := fmt.Sprint(
-		"HTTP/1.1 200 OK\r\n",
-		"Content-Type: text/plain\r\n\r\n",
-		"Hello World!\r\n",
-	)
-
-	conn.Write([]byte(response))
+	dh := response.GetDefaultHeaders(size)
+	err = response.WriteHeaders(conn, dh)
+	if err != nil {
+		log.Printf("error: could not write headers")
+	}
+	return
 }
