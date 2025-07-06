@@ -56,12 +56,10 @@ func GetDefaultHeaders(contentLen int) headers.Headers {
 	return newHeaders
 }
 
-func (w *Writer) WriteHeaders(headers headers.Headers) error {
-	if w.writerState != WriteHeadersState {
-		return fmt.Errorf("Incorrect writer state %d - WriteHeaders should be called second", w.writerState)
-	}
+func internalWriteHeaders(w *Writer, headers headers.Headers) error {
 	for k, v := range headers {
-		_, err := w.W.Write([]byte(fmt.Sprintf("%s: %s\r\n", k, v)))
+		p := []byte{}
+		_, err := w.W.Write(fmt.Appendf(p, "%s: %s\r\n", k, v))
 		if err != nil {
 			return err
 		}
@@ -75,9 +73,38 @@ func (w *Writer) WriteHeaders(headers headers.Headers) error {
 	return nil
 }
 
+func (w *Writer) WriteHeaders(headers headers.Headers) error {
+	if w.writerState != WriteHeadersState {
+		return fmt.Errorf("Incorrect writer state %d - WriteHeaders should be called second", w.writerState)
+	}
+	return internalWriteHeaders(w, headers)
+}
+
+func (w *Writer) WriteTrailers(headers headers.Headers) error {
+	payload := []byte("0\r\n")
+	_, err := w.WriteBody(payload)
+	if err != nil {
+		return fmt.Errorf("error writing Trailer: %v", err)
+	}
+	return internalWriteHeaders(w, headers)
+}
+
 func (w *Writer) WriteBody(p []byte) (int, error) {
 	if w.writerState != WriteBodyState {
 		return 0, fmt.Errorf("Incorrect writer state %d - WriteBody should be called last", w.writerState)
 	}
 	return w.W.Write(p)
+}
+
+func (w *Writer) WriteChunkedBody(p []byte) (int, error) {
+	payload := []byte{}
+	payload = fmt.Appendf(payload, "%X\r\n", len(p))
+	payload = append(payload, p...)
+	payload = append(payload, []byte("\r\n")...)
+	return w.WriteBody(payload)
+}
+
+func (w *Writer) WriteChunkedBodyDone() (int, error) {
+	p := make([]byte, 0, 0)
+	return w.WriteChunkedBody(p)
 }

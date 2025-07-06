@@ -59,8 +59,15 @@ func (s *Server) listen() {
 
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
-	req, _ := request.RequestFromReader(conn)
 	w := response.Writer{W: conn}
+	req, err := request.RequestFromReader(conn)
+	if err != nil {
+		w.WriteStatusLine(response.StatusBadRequest)
+		body := []byte(fmt.Sprintf("Error parsing request: %v", err))
+		w.WriteHeaders(response.GetDefaultHeaders(len(body)))
+		w.WriteBody(body)
+		return
+	}
 
 	s.handler(&w, req)
 
