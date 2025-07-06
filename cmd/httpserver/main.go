@@ -101,7 +101,6 @@ func httpbinWriter(w *response.Writer, req *request.Request) {
 	h.Remove("content-length")
 	h.Set("transfer-encoding", "chunked")
 	h.Set("Trailer", "X-Content-Length")
-	h.Set("Trailer", "X-Content-Length-Content")
 	h.Set("Trailer", "X-Content-SHA256")
 
 	err = w.WriteHeaders(h)
@@ -119,7 +118,6 @@ func httpbinWriter(w *response.Writer, req *request.Request) {
 				// _, err = w.WriteChunkedBodyDone()
 				h := headers.NewHeaders()
 				h.Set("X-Content-Length", fmt.Sprintf("%d", respLen))
-				h.Set("X-Content-Length-Content", fmt.Sprintf("%d", len(fullResp)))
 				h.Set("X-Content-SHA256", fmt.Sprintf("%x", sha256.Sum256(fullResp)))
 				err = w.WriteTrailers(h)
 				if err != nil {
@@ -144,13 +142,73 @@ func httpbinWriter(w *response.Writer, req *request.Request) {
 
 }
 
+func fileWriter(w *response.Writer, req *request.Request) {
+	fmt.Println("Reading from /assets/vim.mp4")
+
+	content, err := os.ReadFile("assets/vim.mp4")
+	if err != nil {
+		log.Printf("error reading file: %v", err)
+		basicHtmlWriter(w, req, response.StatusInternalServerError)
+		return
+	}
+
+	sc := response.StatusOK
+	err = w.WriteStatusLine(sc)
+	if err != nil {
+		log.Printf("Error writing status line: %v", err)
+		basicHtmlWriter(w, req, response.StatusInternalServerError)
+		return
+	}
+
+	h := response.GetDefaultHeaders(0)
+	h.Remove("content-length")
+	h.Set("transfer-encoding", "chunked")
+	h.Set("Trailer", "X-Content-Length")
+	h.Set("Trailer", "X-Content-SHA256")
+	h.Override("Content-Type", "video/mp4")
+
+	err = w.WriteHeaders(h)
+	if err != nil {
+		log.Printf("Error writing headers: %v", err)
+		return
+	}
+	current := 0
+	fullLen := len(content)
+	chunkSize := 1024
+	for current < fullLen {
+		maxSize := fullLen - current
+		chunkLen := min(maxSize, chunkSize)
+		chunkEnd := chunkLen + current
+		buf := content[current:chunkEnd]
+		current = chunkEnd
+		log.Printf("Bytes read: %d", chunkLen)
+		_, err = w.WriteChunkedBody(buf)
+		if err != nil {
+			log.Printf("Error writing chunked body: %v", err)
+			basicHtmlWriter(w, req, response.StatusInternalServerError)
+			return
+		}
+	}
+	h = headers.NewHeaders()
+	h.Set("X-Content-Length", fmt.Sprintf("%d", current))
+	h.Set("X-Content-SHA256", fmt.Sprintf("%x", sha256.Sum256(content)))
+	err = w.WriteTrailers(h)
+	if err != nil {
+		log.Printf("Error writing chunked body end: %v", err)
+	}
+
+}
+
 func handler(w *response.Writer, req *request.Request) {
 	var sc response.StatusCode
 	if strings.HasPrefix(req.RequestLine.RequestTarget, "/httpbin") {
 		httpbinWriter(w, req)
 		return
 	}
-	if req.RequestLine.RequestTarget == "/yourproblem" {
+	if req.RequestLine.RequestTarget == "/video" {
+		fileWriter(w, req)
+		return
+	} else if req.RequestLine.RequestTarget == "/yourproblem" {
 		sc = response.StatusBadRequest
 	} else if req.RequestLine.RequestTarget == "/myproblem" {
 		sc = response.StatusInternalServerError
