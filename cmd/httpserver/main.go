@@ -1,7 +1,7 @@
 package main
 
 import (
-	"io"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -28,19 +28,54 @@ func main() {
 	log.Println("Server gracefully stopped")
 }
 
-func handler(w io.Writer, req *request.Request) *server.HandlerError {
+func handler(w *response.Writer, req *request.Request) {
+	var sc response.StatusCode
+	sl := ""
+	reason := ""
 	if req.RequestLine.RequestTarget == "/yourproblem" {
-		return &server.HandlerError{
-			StatusCode: response.StatusBadRequest,
-			Message:    "Your problem is not my problem\n",
-		}
+		sc = response.StatusBadRequest
+		reason = "Your request honestly kinda sucked."
+	} else if req.RequestLine.RequestTarget == "/myproblem" {
+		sc = response.StatusInternalServerError
+		reason = "Okay, you know what? This one is on me."
+	} else {
+		sc = response.StatusOK
+		reason = "Your request was an absolute banger."
+
 	}
-	if req.RequestLine.RequestTarget == "/myproblem" {
-		return &server.HandlerError{
-			StatusCode: response.StatusInternalServerError,
-			Message:    "Woopsie, my bad\n",
-		}
+	switch sc {
+	case response.StatusOK:
+		sl += "OK"
+	case response.StatusBadRequest:
+		sl += "Bad Request"
+	case response.StatusInternalServerError:
+		sl += "Internal Server Error"
 	}
-	w.Write([]byte("All good, frfr\n"))
-	return nil
+	payload := []byte("<html>" +
+		"  <head>" +
+		fmt.Sprintf("	<title>%d %s</title>", sc, sl) +
+		"  </head>" +
+		"  <body>" +
+		fmt.Sprintf("	<h1>%s</h1>", sl) +
+		fmt.Sprintf("	<p>%s</p>", reason) +
+		"  </body>" +
+		"</html>")
+	err := w.WriteStatusLine(sc)
+	if err != nil {
+		log.Printf("Error writing status line: %v", err)
+		return
+	}
+	h := response.GetDefaultHeaders(len(payload))
+	h.Override("Content-Type", "text/html")
+	err = w.WriteHeaders(h)
+	if err != nil {
+		log.Printf("Error writing headers: %v", err)
+		return
+	}
+	i, err := w.WriteBody(payload)
+	if err != nil {
+		log.Printf("Error writing body: %v", err)
+		return
+	}
+	log.Printf("bytes written: %d\n", i)
 }

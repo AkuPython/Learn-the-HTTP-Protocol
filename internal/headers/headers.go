@@ -15,11 +15,17 @@ func NewHeaders() Headers {
 }
 
 func (h Headers) Set(key, value string) {
+	key = strings.ToLower(key)
 	if h[key] == "" {
 		h[key] = value
 	} else {
 		h[key] = fmt.Sprintf("%s, %s", h[key], value)
 	}
+}
+
+func (h Headers) Override(key, value string) {
+	key = strings.ToLower(key)
+	h[key] = value
 }
 
 func (h Headers) Get(key string) string {
