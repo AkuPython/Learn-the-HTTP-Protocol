@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/AkuPython/Learn-the-HTTP-Protocol/internal/headers"
 	"github.com/AkuPython/Learn-the-HTTP-Protocol/internal/request"
 	"github.com/AkuPython/Learn-the-HTTP-Protocol/internal/response"
 	"github.com/AkuPython/Learn-the-HTTP-Protocol/internal/server"
@@ -98,18 +100,28 @@ func httpbinWriter(w *response.Writer, req *request.Request) {
 	h := response.GetDefaultHeaders(0)
 	h.Remove("content-length")
 	h.Set("transfer-encoding", "chunked")
+	h.Set("Trailer", "X-Content-Length")
+	h.Set("Trailer", "X-Content-Length-Content")
+	h.Set("Trailer", "X-Content-SHA256")
 
 	err = w.WriteHeaders(h)
 	if err != nil {
 		log.Printf("Error writing headers: %v", err)
 		return
 	}
+	fullResp := []byte{}
+	respLen := 0
 	for {
 		buf := make([]byte, 1024, 1024)
 		int, err := resp.Body.Read(buf)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				_, err = w.WriteChunkedBodyDone()
+				// _, err = w.WriteChunkedBodyDone()
+				h := headers.NewHeaders()
+				h.Set("X-Content-Length", fmt.Sprintf("%d", respLen))
+				h.Set("X-Content-Length-Content", fmt.Sprintf("%d", len(fullResp)))
+				h.Set("X-Content-SHA256", fmt.Sprintf("%x", sha256.Sum256(fullResp)))
+				err = w.WriteTrailers(h)
 				if err != nil {
 					log.Printf("Error writing chunked body end: %v", err)
 				}
@@ -119,6 +131,8 @@ func httpbinWriter(w *response.Writer, req *request.Request) {
 			basicHtmlWriter(w, req, response.StatusInternalServerError)
 			break
 		}
+		respLen += int
+		fullResp = append(fullResp, buf[0:int]...)
 		log.Printf("Bytes read: %d", int)
 		_, err = w.WriteChunkedBody(buf)
 		if err != nil {
